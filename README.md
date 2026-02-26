@@ -67,49 +67,6 @@ The `X84SvmScheme` automatically splits payments: 97% to the agent operator, 3% 
 | `@x84-ai/x402/middleware`| `x84PaymentGate` Express middleware                |
 | `@x84-ai/x402/client`   | `X84SvmScheme` for client-side payment building    |
 
-## Required: `@x402/core` patch (until v2.5.0)
-
-> **Only needed with `@x402/core` <2.5.0.** Remove once they publish the fix to npm.
-
-`@x402/core@2.4.0` has a bug where `PaymentOption.extra` is dropped when building payment requirements ([coinbase/x402#1139](https://github.com/coinbase/x402/pull/1139) — already fixed on `main`, not yet published).
-
-This patch is **required** for the `agentMint` dynamic mode — without it, the facilitator never receives the agent identity for on-chain validation and receipt creation.
-
-### Setup (2 steps)
-
-**1.** Copy the patch file from this package into your project:
-
-```bash
-mkdir -p patches
-cp node_modules/@x84-ai/x402/patches/@x402__core.patch patches/
-```
-
-**2.** Add to your `package.json`:
-
-```json
-{
-  "pnpm": {
-    "patchedDependencies": {
-      "@x402/core": "patches/@x402__core.patch"
-    }
-  }
-}
-```
-
-Then `pnpm install` — done. Works on EasyPanel, Docker, any CI/CD.
-
-### When to remove
-
-When `@x402/core` ≥2.5.0 is on npm. Then:
-
-```bash
-pnpm update @x402/core
-rm -rf patches/
-# remove "pnpm.patchedDependencies" from package.json
-```
-
-Track: [coinbase/x402#1139](https://github.com/coinbase/x402/pull/1139).
-
 ## Configuration
 
 ### Environment variables
