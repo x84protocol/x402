@@ -18,7 +18,7 @@ import { x84PaymentGate } from "@x84-ai/x402/middleware";
 
 const app = express();
 
-// Dynamic mode — resolves payTo + price from on-chain via agent NFT mint
+// Payment config resolved from on-chain PaymentRequirement PDA
 app.use(
   x84PaymentGate({
     agentMint: "YourAgentNftMintAddress",
@@ -29,17 +29,17 @@ app.use(
     },
   })
 );
+```
 
-// Static mode — explicit payTo + price
-app.use(
-  x84PaymentGate({
-    payTo: "YourSolanaWalletAddress",
-    network: "devnet",
-    routes: {
-      "POST /": { price: "$0.001", description: "Agent query" },
-    },
-  })
-);
+The `agentMint` is the agent's NFT mint address on Solana. The middleware derives the PaymentRequirement PDA from it and resolves `payTo` and `price` at runtime — the on-chain PDA is the single source of truth.
+
+You can override the price per-route if needed:
+
+```typescript
+routes: {
+  "POST /": { price: "$0.001", description: "Agent query" },
+  "POST /premium": { price: "$0.01", description: "Premium query" },
+}
 ```
 
 ### Client — paying for agent services
@@ -73,23 +73,22 @@ The `X84SvmScheme` automatically splits payments: 97% to the agent operator, 3% 
 
 | Variable         | Required | Description                           |
 | ---------------- | -------- | ------------------------------------- |
-| `AGENT_MINT`     | Dynamic  | Agent NFT mint address                |
-| `SOLANA_RPC_URL`  | Dynamic  | Solana RPC endpoint                   |
+| `AGENT_MINT`     | Yes      | Agent NFT mint address                |
+| `SOLANA_RPC_URL`  | No       | Solana RPC endpoint (defaults by network) |
 | `SOLANA_NETWORK` | No       | `devnet` or `mainnet` (default: devnet)|
 
 ### `X84PaymentGateConfig`
 
-| Field            | Type     | Description                                                |
-| ---------------- | -------- | ---------------------------------------------------------- |
-| `payTo`          | string?  | Static payment destination (not needed with `agentMint`)   |
-| `agentMint`      | string?  | Agent NFT mint — resolves payTo + price from on-chain      |
-| `network`        | string?  | `devnet`, `mainnet`, or CAIP-2 string                      |
-| `rpcUrl`         | string?  | Solana RPC URL (required for `agentMint` mode)             |
-| `routes`         | object   | Route → payment config map                                 |
-| `facilitatorUrl` | string?  | Custom facilitator (default: `https://facilitator.x84.ai`) |
-| `treasury`       | string?  | Override protocol fee treasury                             |
-| `protocolFeeBps` | number?  | Override fee basis points (default: 300 = 3%)              |
-| `serviceType`    | string?  | PDA service type (default: `a2a`)                          |
+| Field            | Type     | Required | Description                                                |
+| ---------------- | -------- | -------- | ---------------------------------------------------------- |
+| `agentMint`      | string   | Yes      | Agent NFT mint — derives PaymentRequirement PDA            |
+| `routes`         | object   | Yes      | Route → payment config map                                 |
+| `network`        | string   | No       | `devnet`, `mainnet`, or CAIP-2 string                      |
+| `rpcUrl`         | string   | No       | Solana RPC URL (defaults based on network)                 |
+| `facilitatorUrl` | string   | No       | Custom facilitator (default: `https://facilitator.x84.ai`) |
+| `treasury`       | string   | No       | Override protocol fee treasury                             |
+| `protocolFeeBps` | number   | No       | Override fee basis points (default: 300 = 3%)              |
+| `serviceType`    | string   | No       | PDA service type (default: `a2a`)                          |
 
 ## How it works
 
