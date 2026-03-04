@@ -18,11 +18,13 @@ import {
   prependTransactionMessageInstruction,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
+  setTransactionMessageLifetimeUsingDurableNonce,
   createSolanaRpc,
   mainnet,
   devnet,
   type TransactionSigner,
   type Address,
+  type Nonce,
 } from "@solana/kit";
 import { X84_TREASURY, PROTOCOL_FEE_BPS } from "./constants.js";
 
@@ -42,12 +44,26 @@ function createRpcClient(network: string, customRpcUrl?: string) {
   return createSolanaRpc(devnet("https://api.devnet.solana.com"));
 }
 
+/** Durable nonce configuration for transactions that survive LLM thinking time */
+export interface DurableNonceConfig {
+  /** The nonce account address on-chain */
+  nonceAccountAddress: Address;
+  /** The authority that can advance the nonce (usually the wallet) */
+  nonceAuthorityAddress: Address;
+  /** The current nonce value (fetched from the nonce account) */
+  nonce: string;
+}
+
 /**
  * x84 SVM payment scheme — builds transactions with protocol fee split.
  *
  * Instead of a single transfer (100% to payTo), this scheme creates:
  * - Transfer (100% - protocolFee) to payTo
  * - Transfer protocolFee to x84 treasury
+ *
+ * Supports durable nonce for x402 payments through LLMs, where the time
+ * between signing and submission can exceed the ~60s blockhash window
+ * due to model thinking time.
  *
  * Implements the SchemeNetworkClient interface from @x402/core.
  */
@@ -56,7 +72,7 @@ export class X84SvmScheme {
 
   constructor(
     private readonly signer: TransactionSigner,
-    private readonly config?: { rpcUrl?: string },
+    private readonly config?: { rpcUrl?: string; durableNonce?: DurableNonceConfig },
   ) {}
 
   async createPaymentPayload(
@@ -141,21 +157,23 @@ export class X84SvmScheme {
       );
     }
 
-    const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
-
-    // Random nonce memo for uniqueness
-    const nonce = crypto.getRandomValues(new Uint8Array(16));
+    // Random memo nonce for uniqueness
+    const memoNonce = crypto.getRandomValues(new Uint8Array(16));
     const memoIx = {
       programAddress: MEMO_PROGRAM_ADDRESS,
       accounts: [] as readonly never[],
       data: new TextEncoder().encode(
-        Array.from(nonce)
+        Array.from(memoNonce)
           .map((b) => b.toString(16).padStart(2, "0"))
           .join(""),
       ),
     };
 
-    const tx = pipe(
+    const durableNonce = this.config?.durableNonce;
+    const useDurableNonce = !!durableNonce;
+
+    // Build base transaction
+    const baseTx = pipe(
       createTransactionMessage({ version: 0 }),
       (tx) =>
         setTransactionMessageComputeUnitPrice(
@@ -175,8 +193,29 @@ export class X84SvmScheme {
           [transferToPayee, transferToTreasury, memoIx],
           tx,
         ),
-      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
     );
+
+    // Set lifetime: durable nonce (never expires) or blockhash (~60s)
+    let tx;
+    if (useDurableNonce) {
+      console.error(
+        `[x84-x402] Using durable nonce: ${durableNonce.nonceAccountAddress}`,
+      );
+      tx = setTransactionMessageLifetimeUsingDurableNonce(
+        {
+          nonce: durableNonce.nonce as Nonce,
+          nonceAccountAddress: durableNonce.nonceAccountAddress,
+          nonceAuthorityAddress: durableNonce.nonceAuthorityAddress,
+        },
+        baseTx,
+      );
+    } else {
+      console.error(
+        `[x84-x402] Using blockhash (no durable nonce configured)`,
+      );
+      const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+      tx = setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, baseTx);
+    }
 
     const signedTransaction =
       await partiallySignTransactionMessageWithSigners(tx);
